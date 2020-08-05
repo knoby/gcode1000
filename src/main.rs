@@ -1,4 +1,4 @@
-use gtk::{BoxExt, ContainerExt, WidgetExt};
+use gtk::{BoxExt, ButtonExt, ContainerExt, WidgetExt};
 use relm::{connect, Component, ContainerWidget, Relm, Update, Widget};
 use relm_derive::Msg;
 
@@ -44,6 +44,8 @@ impl Widget for Win {
         let gtk_box = gtk::Box::new(gtk::Orientation::Vertical, 1);
         let counter_1 = gtk_box.add_widget::<counter::Counter>(());
         let counter_2 = gtk_box.add_widget::<counter::Counter>(());
+        let reset_button = gtk::Button::with_label("Reset");
+        gtk_box.add(&reset_button);
 
         for child in gtk_box.get_children() {
             gtk_box.set_child_packing(&child, true, true, 0, gtk::PackType::Start);
@@ -59,6 +61,18 @@ impl Widget for Win {
             window,
             connect_delete_event(_, _),
             return (Some(Msg::Quit), gtk::Inhibit(false))
+        );
+        connect!(
+            reset_button,
+            connect_clicked(_),
+            counter_2,
+            counter::Msg::Reset
+        );
+        connect!(
+            reset_button,
+            connect_clicked(_),
+            counter_1,
+            counter::Msg::Reset
         );
 
         // Return the Widget

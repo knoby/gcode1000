@@ -10,6 +10,7 @@ pub struct Model {
 pub enum Msg {
     Inc,
     Dec,
+    Reset,
 }
 
 struct Widgets {
@@ -39,6 +40,10 @@ impl Update for Counter {
             }
             Msg::Inc => {
                 self.model.counter += 1;
+                self.widgets.label.set_text(&self.model.counter.to_string());
+            }
+            Msg::Reset => {
+                self.model.counter = 0;
                 self.widgets.label.set_text(&self.model.counter.to_string());
             }
         }
