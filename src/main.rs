@@ -1,45 +1,30 @@
-use gtk::{BoxExt, ButtonExt, ContainerExt, LabelExt, WidgetExt};
-use relm::{connect, Relm, Update, Widget};
+use gtk::{BoxExt, ContainerExt, WidgetExt};
+use relm::{connect, Component, ContainerWidget, Relm, Update, Widget};
 use relm_derive::Msg;
 
-// the model
-struct Model {
-    counter: u32,
-}
+mod counter;
 
 #[derive(Msg)]
-enum MyMsg {
-    Inc,
-    Dec,
+enum Msg {
     Quit,
 }
 
 struct Win {
-    model: Model,
+    counter_1: Component<counter::Counter>,
+    counter_2: Component<counter::Counter>,
     window: gtk::Window,
-    lable: gtk::Label,
 }
 
 impl Update for Win {
-    type Model = Model;
+    type Model = ();
     type ModelParam = ();
-    type Msg = MyMsg;
+    type Msg = Msg;
 
-    fn model(_relm: &Relm<Self>, _param: Self::ModelParam) -> Self::Model {
-        Model { counter: 0 }
-    }
+    fn model(relm: &Relm<Self>, param: Self::ModelParam) -> Self::Model {}
 
     fn update(&mut self, event: Self::Msg) {
         match event {
-            MyMsg::Dec => {
-                self.model.counter -= 1;
-                self.lable.set_text(&self.model.counter.to_string());
-            }
-            MyMsg::Inc => {
-                self.model.counter += 1;
-                self.lable.set_text(&self.model.counter.to_string());
-            }
-            MyMsg::Quit => gtk::main_quit(),
+            Msg::Quit => gtk::main_quit(),
         }
     }
 }
@@ -52,38 +37,35 @@ impl Widget for Win {
     }
 
     fn view(relm: &Relm<Self>, model: Self::Model) -> Self {
-        // Build the UI
+        // Create the UI
         let window = gtk::Window::new(gtk::WindowType::Toplevel);
         window.set_size_request(400, 200);
 
-        let gtk_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        let gtk_box = gtk::Box::new(gtk::Orientation::Vertical, 1);
+        let counter_1 = gtk_box.add_widget::<counter::Counter>(());
+        let counter_2 = gtk_box.add_widget::<counter::Counter>(());
 
-        let inc_button = gtk::Button::with_label("Inc");
-        let dec_button = gtk::Button::with_label("Dec");
-        let counter_label = gtk::Label::new(Some("0"));
-
-        gtk_box.pack_start(&inc_button, true, true, 0);
-        gtk_box.pack_start(&dec_button, true, true, 0);
-        gtk_box.pack_start(&counter_label, true, true, 0);
+        for child in gtk_box.get_children() {
+            gtk_box.set_child_packing(&child, true, true, 0, gtk::PackType::Start);
+        }
 
         window.add(&gtk_box);
 
         window.show_all();
 
-        // Connect events
-        connect!(relm, inc_button, connect_clicked(_), MyMsg::Inc);
-        connect!(relm, dec_button, connect_clicked(_), MyMsg::Dec);
+        // Connect the signals
         connect!(
             relm,
             window,
             connect_delete_event(_, _),
-            return (Some(MyMsg::Quit), gtk::Inhibit(false))
+            return (Some(Msg::Quit), gtk::Inhibit(false))
         );
 
-        Self {
-            model,
+        // Return the Widget
+        Win {
             window,
-            lable: counter_label,
+            counter_1,
+            counter_2,
         }
     }
 }
