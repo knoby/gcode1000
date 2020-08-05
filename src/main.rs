@@ -54,16 +54,17 @@ impl Widget for Win {
     fn view(relm: &Relm<Self>, model: Self::Model) -> Self {
         // Build the UI
         let window = gtk::Window::new(gtk::WindowType::Toplevel);
+        window.set_size_request(400, 200);
 
-        let gtk_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        let gtk_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
 
         let inc_button = gtk::Button::with_label("Inc");
         let dec_button = gtk::Button::with_label("Dec");
         let counter_label = gtk::Label::new(Some("0"));
 
-        gtk_box.pack_end(&inc_button, true, true, 0);
-        gtk_box.pack_end(&dec_button, true, true, 0);
-        gtk_box.pack_end(&counter_label, true, true, 0);
+        gtk_box.pack_start(&inc_button, true, true, 0);
+        gtk_box.pack_start(&dec_button, true, true, 0);
+        gtk_box.pack_start(&counter_label, true, true, 0);
 
         window.add(&gtk_box);
 
