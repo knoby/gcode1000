@@ -1,0 +1,12 @@
+[package]
+authors = ["knoby <maximilian.brinkmann@posteo.de>"]
+edition = "2018"
+name = "gcode1000"
+version = "0.1.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+gtk = "0.9.1"
+relm = "0.20.0"
+relm-derive = "0.20.0"
