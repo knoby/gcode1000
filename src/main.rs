@@ -4,14 +4,20 @@ use relm_derive::Msg;
 
 mod control;
 
-#[derive(Msg)]
+#[derive(Debug, Clone, Msg)]
 enum Msg {
     Quit,
+    GetPorts,
+}
+
+struct ConnectionWidgets {
+    port_combobox: gtk::ComboBoxText,
 }
 
 struct Win {
     manual_control: Component<control::Widget>,
     window: gtk::Window,
+    connection_widgets: ConnectionWidgets,
 }
 
 impl Update for Win {
@@ -24,6 +30,13 @@ impl Update for Win {
     fn update(&mut self, event: Self::Msg) {
         match event {
             Msg::Quit => gtk::main_quit(),
+            Msg::GetPorts => {
+                // Remove all Ports and get new
+                self.connection_widgets.port_combobox.remove_all();
+                for port in get_ports() {
+                    self.connection_widgets.port_combobox.append_text(&port);
+                }
+            }
         }
     }
 }
@@ -49,6 +62,31 @@ impl Widget for Win {
             .title("GCode 1000")
             .build();
         window.set_titlebar(Some(&header_bar));
+
+        // Create vertical box to store Statusline and main window
+        let vbox = gtk::Box::new(gtk::Orientation::Vertical, 2);
+
+        // Create the status line
+        let statusline = gtk::Box::new(gtk::Orientation::Horizontal, 2);
+
+        // Add a simple combobox to choose the port
+        let port_combobox = gtk::ComboBoxText::new();
+        for port in get_ports().iter() {
+            port_combobox.append_text(port);
+        }
+        port_combobox.set_active(Some(0));
+
+        statusline.pack_start(&gtk::Label::new(Some("Port:")), false, false, 0);
+        statusline.pack_start(&port_combobox, false, false, 0);
+
+        let connect_btn = gtk::Button::with_label(&"Connect");
+        connect_btn
+            .get_style_context()
+            .add_class("suggested-action");
+        //.add_class("destructive-action");
+        statusline.pack_start(&connect_btn, false, false, 0);
+
+        vbox.pack_start(&statusline, false, false, 0);
 
         // Create a notebook to have some nice tabs on the left side
         let notebook = gtk::NotebookBuilder::default()
@@ -78,7 +116,9 @@ impl Widget for Win {
             Some(&create_tab_widget("Settings")),
         );
 
-        window.add(&notebook);
+        vbox.pack_end(&notebook, true, true, 0);
+
+        window.add(&vbox);
 
         window.show_all();
 
@@ -94,6 +134,7 @@ impl Widget for Win {
         Win {
             window,
             manual_control,
+            connection_widgets: ConnectionWidgets { port_combobox },
         }
     }
 }
@@ -112,6 +153,15 @@ fn create_tab_widget(label: &str) -> gtk::Box {
     tab_widget.show_all();
 
     tab_widget
+}
+
+/// Find avaible ports
+fn get_ports() -> Vec<String> {
+    serialport::available_ports()
+        .unwrap()
+        .iter()
+        .map(|port| port.port_name.clone())
+        .collect()
 }
 
 fn main() {
