@@ -1,21 +1,27 @@
 use gtk::prelude::*;
 use relm::{connect, Component, ContainerWidget, Relm, Update, Widget};
 use relm_derive::Msg;
+use serialport::prelude::*;
 
 mod control;
+mod log;
 
 #[derive(Debug, Clone, Msg)]
 enum Msg {
     Quit,
     GetPorts,
+    Connect,
 }
 
 struct ConnectionWidgets {
     port_combobox: gtk::ComboBoxText,
+    connect_btn: gtk::Button,
 }
 
 struct Win {
     manual_control: Component<control::Widget>,
+    logging: Component<log::Widget>,
+    port: Option<Box<dyn serialport::SerialPort>>,
     window: gtk::Window,
     connection_widgets: ConnectionWidgets,
 }
@@ -35,6 +41,50 @@ impl Update for Win {
                 self.connection_widgets.port_combobox.remove_all();
                 for port in get_ports() {
                     self.connection_widgets.port_combobox.append_text(&port);
+                }
+            }
+            Msg::Connect => {
+                if self.port.is_none() {
+                    // Open a connection to the port specified in the connection tab
+                    let port_settings = serialport::SerialPortSettings {
+                        baud_rate: 250_000,
+                        stop_bits: StopBits::One,
+                        data_bits: DataBits::Eight,
+                        flow_control: FlowControl::None,
+                        parity: Parity::None,
+                        timeout: std::time::Duration::from_millis(10),
+                    };
+                    let connection_string = self
+                        .connection_widgets
+                        .port_combobox
+                        .get_active_text()
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| "".to_string());
+                    if let Ok(port) =
+                        serialport::open_with_settings(&connection_string, &port_settings)
+                    {
+                        self.port = Some(port);
+                        self.connection_widgets.connect_btn.set_label("Disconnect");
+                        self.connection_widgets
+                            .connect_btn
+                            .get_style_context()
+                            .add_class("destructive-action");
+                        self.connection_widgets
+                            .connect_btn
+                            .get_style_context()
+                            .remove_class("suggested-action");
+                    }
+                } else {
+                    self.port.take(); // Take connection out of the Option and drop it
+                    self.connection_widgets.connect_btn.set_label("Connect");
+                    self.connection_widgets
+                        .connect_btn
+                        .get_style_context()
+                        .remove_class("destructive-action");
+                    self.connection_widgets
+                        .connect_btn
+                        .get_style_context()
+                        .add_class("suggested-action");
                 }
             }
         }
@@ -83,7 +133,6 @@ impl Widget for Win {
         connect_btn
             .get_style_context()
             .add_class("suggested-action");
-        //.add_class("destructive-action");
         statusline.pack_start(&connect_btn, false, false, 0);
 
         vbox.pack_start(&statusline, false, false, 0);
@@ -108,11 +157,18 @@ impl Widget for Win {
             Some(&create_tab_widget("Print")),
         );
 
+        // Add Log Page
+        let logging = notebook.add_widget::<log::Widget>(());
+        notebook.set_tab_label(
+            &notebook.get_nth_page(Some(2)).unwrap(), // Safe to unwrap because we added the 1st element just bevore
+            Some(&create_tab_widget("Log")),
+        );
+
         // Add Settings Page
         let settings = gtk::Label::new(Some("Settings"));
         notebook.add(&settings);
         notebook.set_tab_label(
-            &notebook.get_nth_page(Some(2)).unwrap(), // Safe to unwrap because we added the 2st element just bevore
+            &notebook.get_nth_page(Some(3)).unwrap(), // Safe to unwrap because we added the 2st element just bevore
             Some(&create_tab_widget("Settings")),
         );
 
@@ -129,12 +185,18 @@ impl Widget for Win {
             connect_delete_event(_, _),
             return (Some(Msg::Quit), gtk::Inhibit(false))
         );
+        connect!(relm, connect_btn, connect_clicked(_), Msg::Connect);
 
         // Return the Widget
         Win {
             window,
             manual_control,
-            connection_widgets: ConnectionWidgets { port_combobox },
+            logging,
+            connection_widgets: ConnectionWidgets {
+                port_combobox,
+                connect_btn,
+            },
+            port: None,
         }
     }
 }
@@ -146,6 +208,7 @@ fn create_tab_widget(label: &str) -> gtk::Box {
         "Settings" => "settings.png",
         "Move" => "move.png",
         "Print" => "printer.png",
+        "Log" => "menu.png",
         _ => "",
     });
     tab_widget.pack_start(&gtk::Image::from_file(image_path), false, false, 0);
