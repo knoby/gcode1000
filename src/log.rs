@@ -8,6 +8,7 @@ use relm_derive::Msg;
 #[derive(Debug, Msg)]
 pub enum Msg {
     LogLine(String),
+    SendCommand(String),
     ClearLog,
 }
 
@@ -24,6 +25,7 @@ struct GtkWidgets {
 
 pub struct Widget {
     model: Model,
+    relm: relm::Relm<Widget>,
     widgets: GtkWidgets,
 }
 
@@ -59,6 +61,10 @@ impl relm::Update for Widget {
                     .get_buffer()
                     .unwrap()
                     .delete(&mut start, &mut end)
+            }
+            Msg::SendCommand(text) => {
+                self.relm.stream().emit(Msg::LogLine(text));
+                self.widgets.send_cmd.set_text("");
             }
         }
     }
@@ -102,11 +108,12 @@ impl relm::Widget for Widget {
 
         root_box.pack_start(&hbox, false, false, 3);
 
+        let send_cmd_clone = send_cmd.clone();
         relm::connect!(
             relm,
             send_btn,
             connect_clicked(_),
-            Msg::LogLine("Hallo Welt!".to_string())
+            Msg::SendCommand(send_cmd_clone.get_text().to_string())
         );
         relm::connect!(relm, clear_btn, connect_clicked(_), Msg::ClearLog);
 
@@ -119,6 +126,7 @@ impl relm::Widget for Widget {
                 clear_btn,
                 textview,
             },
+            relm: relm.clone(),
         }
     }
 }

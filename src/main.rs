@@ -1,29 +1,22 @@
 use gtk::prelude::*;
 use relm::{connect, Component, ContainerWidget, Relm, Update, Widget};
 use relm_derive::Msg;
-use serialport::prelude::*;
 
+mod connection;
 mod control;
 mod log;
 
 #[derive(Debug, Clone, Msg)]
 enum Msg {
     Quit,
-    GetPorts,
-    Connect,
-}
-
-struct ConnectionWidgets {
-    port_combobox: gtk::ComboBoxText,
-    connect_btn: gtk::Button,
 }
 
 struct Win {
     manual_control: Component<control::Widget>,
+    connection_control: Component<connection::Widget>,
     logging: Component<log::Widget>,
     port: Option<Box<dyn serialport::SerialPort>>,
     window: gtk::Window,
-    connection_widgets: ConnectionWidgets,
 }
 
 impl Update for Win {
@@ -36,57 +29,6 @@ impl Update for Win {
     fn update(&mut self, event: Self::Msg) {
         match event {
             Msg::Quit => gtk::main_quit(),
-            Msg::GetPorts => {
-                // Remove all Ports and get new
-                self.connection_widgets.port_combobox.remove_all();
-                for port in get_ports() {
-                    self.connection_widgets.port_combobox.append_text(&port);
-                }
-            }
-            Msg::Connect => {
-                if self.port.is_none() {
-                    // Open a connection to the port specified in the connection tab
-                    let port_settings = serialport::SerialPortSettings {
-                        baud_rate: 250_000,
-                        stop_bits: StopBits::One,
-                        data_bits: DataBits::Eight,
-                        flow_control: FlowControl::None,
-                        parity: Parity::None,
-                        timeout: std::time::Duration::from_millis(10),
-                    };
-                    let connection_string = self
-                        .connection_widgets
-                        .port_combobox
-                        .get_active_text()
-                        .map(|s| s.to_string())
-                        .unwrap_or_else(|| "".to_string());
-                    if let Ok(port) =
-                        serialport::open_with_settings(&connection_string, &port_settings)
-                    {
-                        self.port = Some(port);
-                        self.connection_widgets.connect_btn.set_label("Disconnect");
-                        self.connection_widgets
-                            .connect_btn
-                            .get_style_context()
-                            .add_class("destructive-action");
-                        self.connection_widgets
-                            .connect_btn
-                            .get_style_context()
-                            .remove_class("suggested-action");
-                    }
-                } else {
-                    self.port.take(); // Take connection out of the Option and drop it
-                    self.connection_widgets.connect_btn.set_label("Connect");
-                    self.connection_widgets
-                        .connect_btn
-                        .get_style_context()
-                        .remove_class("destructive-action");
-                    self.connection_widgets
-                        .connect_btn
-                        .get_style_context()
-                        .add_class("suggested-action");
-                }
-            }
         }
     }
 }
@@ -116,26 +58,7 @@ impl Widget for Win {
         // Create vertical box to store Statusline and main window
         let vbox = gtk::Box::new(gtk::Orientation::Vertical, 2);
 
-        // Create the status line
-        let statusline = gtk::Box::new(gtk::Orientation::Horizontal, 2);
-
-        // Add a simple combobox to choose the port
-        let port_combobox = gtk::ComboBoxText::new();
-        for port in get_ports().iter() {
-            port_combobox.append_text(port);
-        }
-        port_combobox.set_active(Some(0));
-
-        statusline.pack_start(&gtk::Label::new(Some("Port:")), false, false, 0);
-        statusline.pack_start(&port_combobox, false, false, 0);
-
-        let connect_btn = gtk::Button::with_label(&"Connect");
-        connect_btn
-            .get_style_context()
-            .add_class("suggested-action");
-        statusline.pack_start(&connect_btn, false, false, 0);
-
-        vbox.pack_start(&statusline, false, false, 0);
+        let connection_control = vbox.add_widget::<connection::Widget>(());
 
         // Create a notebook to have some nice tabs on the left side
         let notebook = gtk::NotebookBuilder::default()
@@ -185,17 +108,13 @@ impl Widget for Win {
             connect_delete_event(_, _),
             return (Some(Msg::Quit), gtk::Inhibit(false))
         );
-        connect!(relm, connect_btn, connect_clicked(_), Msg::Connect);
 
         // Return the Widget
         Win {
             window,
             manual_control,
+            connection_control,
             logging,
-            connection_widgets: ConnectionWidgets {
-                port_combobox,
-                connect_btn,
-            },
             port: None,
         }
     }
@@ -216,15 +135,6 @@ fn create_tab_widget(label: &str) -> gtk::Box {
     tab_widget.show_all();
 
     tab_widget
-}
-
-/// Find avaible ports
-fn get_ports() -> Vec<String> {
-    serialport::available_ports()
-        .unwrap()
-        .iter()
-        .map(|port| port.port_name.clone())
-        .collect()
 }
 
 fn main() {
