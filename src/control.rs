@@ -13,7 +13,7 @@ struct GtkWidgets {
 }
 
 pub struct Widget {
-    model: Model,
+    _model: Model,
     widgets: GtkWidgets,
 }
 
@@ -22,11 +22,11 @@ impl relm::Update for Widget {
     type ModelParam = ();
     type Msg = Msg;
 
-    fn model(relm: &Relm<Self>, param: Self::ModelParam) -> Self::Model {
+    fn model(_relm: &Relm<Self>, _param: Self::ModelParam) -> Self::Model {
         Model::default()
     }
 
-    fn update(&mut self, event: Self::Msg) {}
+    fn update(&mut self, _event: Self::Msg) {}
 }
 
 impl relm::Widget for Widget {
@@ -36,7 +36,7 @@ impl relm::Widget for Widget {
         self.widgets.root.clone()
     }
 
-    fn view(relm: &Relm<Self>, model: Self::Model) -> Self {
+    fn view(_relm: &Relm<Self>, model: Self::Model) -> Self {
         // Create all UI Elements
         let btn_x_neg = gtk::Button::with_label("X-");
         let btn_x_pos = gtk::Button::with_label("X+");
@@ -81,7 +81,7 @@ impl relm::Widget for Widget {
         grid.attach(&btn_z_home, 3, 5, 1, 2);
 
         Self {
-            model,
+            _model: model,
             widgets: GtkWidgets { root: grid },
         }
     }

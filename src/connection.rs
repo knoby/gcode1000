@@ -13,6 +13,7 @@ pub enum Msg {
 
 pub struct Model {
     port: Option<Box<dyn SerialPort>>,
+    stream: relm::EventStream<Msg>,
 }
 
 pub struct Widgets {
@@ -31,14 +32,17 @@ impl relm::Update for Widget {
     type ModelParam = ();
     type Msg = Msg;
 
-    fn model(relm: &Relm<Self>, param: Self::ModelParam) -> Self::Model {
-        Model { port: None }
+    fn model(relm: &Relm<Self>, _param: Self::ModelParam) -> Self::Model {
+        Model {
+            port: None,
+            stream: relm.stream().clone(),
+        }
     }
 
     fn update(&mut self, event: Self::Msg) {
         match event {
-            Msg::SendLine(line) => (),
-            Msg::ReciveLine(Line) => (),
+            Msg::SendLine(_line) => (),
+            Msg::ReciveLine(_line) => (),
             Msg::Connect => {
                 if self.model.port.is_none() {
                     // Open a connection to the port specified in the connection tab
@@ -56,43 +60,49 @@ impl relm::Update for Widget {
                         .get_active_text()
                         .map(|s| s.to_string())
                         .unwrap_or_else(|| "".to_string());
+
+                    let stream = self.model.stream.clone();
+                    let (_channel, sender) =
+                        relm::Channel::new(move |line: String| stream.emit(Msg::ReciveLine(line)));
+
                     if let Ok(mut port) =
                         serialport::open_with_settings(&connection_string, &port_settings)
                     {
                         std::thread::spawn(move || {
-                            // Read data from port in an endless looop
+                            // Read data from port in an endless loop
                             let mut buffer = vec![0; 512];
                             let mut line = String::new();
                             loop {
-                                {
-                                    // Try to read a line
-                                    match port.read(&mut buffer) {
-                                        Ok(n) if n > 0 => {
-                                            for &c in &buffer {
-                                                if c != 0x0a {
+                                // Try to read a line
+                                match port.read(&mut buffer) {
+                                    Ok(n) if n > 0 => {
+                                        println!("{}", n);
+                                        for &c in &buffer {
+                                            if c != 0x0a {
+                                                if c.is_ascii_alphanumeric()
+                                                    | c.is_ascii_punctuation()
+                                                    | c.is_ascii_whitespace()
+                                                {
                                                     line.push(c.into());
-                                                } else {
-                                                    println!(">>>>>{}<<<<<<<", line);
-                                                    line.clear();
-                                                    println!(
-                                                        "------------------------------------"
-                                                    );
-                                                };
-                                            }
-                                            buffer = vec![0; 512];
+                                                }
+                                            } else {
+                                                sender.send(line.clone()).unwrap();
+                                                line.clear();
+                                            };
                                         }
+                                        buffer = vec![0; 512];
+                                    }
 
-                                        Ok(_) => (),
+                                    Ok(_) => (),
 
-                                        Err(err) => match err.kind() {
-                                            std::io::ErrorKind::TimedOut => (),
-                                            _ => {
-                                                println!("{:?}", err);
-                                                break;
-                                            }
-                                        },
-                                    };
-                                }
+                                    Err(err) => match err.kind() {
+                                        std::io::ErrorKind::TimedOut => (),
+                                        _ => {
+                                            println!("{:?}", err);
+                                            break;
+                                        }
+                                    },
+                                };
                             }
                         });
                         self.model.port = None;
@@ -130,7 +140,7 @@ impl relm::Widget for Widget {
         self.widgets.root.clone()
     }
 
-    fn view(relm: &Relm<Self>, model: Self::Model) -> Self {
+    fn view(relm: &Relm<Self>, _model: Self::Model) -> Self {
         // Create the status line
         let statusline = gtk::Box::new(gtk::Orientation::Horizontal, 2);
 
@@ -158,7 +168,10 @@ impl relm::Widget for Widget {
                 connect_btn,
                 port_combobox,
             },
-            model: Model { port: None },
+            model: Model {
+                port: None,
+                stream: relm.stream().clone(),
+            },
         }
     }
 }

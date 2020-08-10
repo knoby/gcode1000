@@ -18,14 +18,11 @@ pub struct Model {}
 struct GtkWidgets {
     root: gtk::Box,
     textview: gtk::TextView,
-    clear_btn: gtk::Button,
-    send_btn: gtk::Button,
     send_cmd: gtk::Entry,
 }
 
 pub struct Widget {
-    model: Model,
-    relm: relm::Relm<Widget>,
+    _model: Model,
     widgets: GtkWidgets,
 }
 
@@ -34,15 +31,15 @@ impl relm::Update for Widget {
     type ModelParam = ();
     type Msg = Msg;
 
-    fn model(relm: &Relm<Self>, param: Self::ModelParam) -> Self::Model {
+    fn model(_relm: &Relm<Self>, _param: Self::ModelParam) -> Self::Model {
         Model::default()
     }
 
     fn update(&mut self, event: Self::Msg) {
         match event {
             Msg::LogLine(text) => {
+                let text = dbg!(text);
                 // Get current time
-                let time = std::time::SystemTime::now();
                 let mut end_iter = self.widgets.textview.get_buffer().unwrap().get_end_iter();
                 self.widgets
                     .textview
@@ -62,8 +59,7 @@ impl relm::Update for Widget {
                     .unwrap()
                     .delete(&mut start, &mut end)
             }
-            Msg::SendCommand(text) => {
-                self.relm.stream().emit(Msg::LogLine(text));
+            Msg::SendCommand(_text) => {
                 self.widgets.send_cmd.set_text("");
             }
         }
@@ -118,15 +114,12 @@ impl relm::Widget for Widget {
         relm::connect!(relm, clear_btn, connect_clicked(_), Msg::ClearLog);
 
         Self {
-            model,
+            _model: model,
             widgets: GtkWidgets {
                 root: root_box,
-                send_btn,
                 send_cmd,
-                clear_btn,
                 textview,
             },
-            relm: relm.clone(),
         }
     }
 }

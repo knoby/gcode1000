@@ -12,10 +12,10 @@ enum Msg {
 }
 
 struct Win {
-    manual_control: Component<control::Widget>,
-    connection_control: Component<connection::Widget>,
-    logging: Component<log::Widget>,
-    port: Option<Box<dyn serialport::SerialPort>>,
+    _manual_control: Component<control::Widget>,
+    _connection_control: Component<connection::Widget>,
+    _logging: Component<log::Widget>,
+    _port: Option<Box<dyn serialport::SerialPort>>,
     window: gtk::Window,
 }
 
@@ -24,7 +24,7 @@ impl Update for Win {
     type ModelParam = ();
     type Msg = Msg;
 
-    fn model(relm: &Relm<Self>, param: Self::ModelParam) -> Self::Model {}
+    fn model(_relm: &Relm<Self>, _param: Self::ModelParam) -> Self::Model {}
 
     fn update(&mut self, event: Self::Msg) {
         match event {
@@ -108,14 +108,15 @@ impl Widget for Win {
             connect_delete_event(_, _),
             return (Some(Msg::Quit), gtk::Inhibit(false))
         );
+        connect!(connection_control@connection::Msg::ReciveLine(ref text), logging, log::Msg::LogLine(text.clone()));
 
         // Return the Widget
         Win {
             window,
-            manual_control,
-            connection_control,
-            logging,
-            port: None,
+            _manual_control: manual_control,
+            _connection_control: connection_control,
+            _logging: logging,
+            _port: None,
         }
     }
 }
