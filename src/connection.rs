@@ -8,18 +8,31 @@ use std::io::Read;
 pub enum Msg {
     Connect,
     SendLine(String),
+    Disconnect,
     ReciveLine(String),
 }
 
 pub struct Model {
-    port: Option<Box<dyn SerialPort>>,
+    connection_thread: Option<std::thread::JoinHandle<()>>,
     stream: relm::EventStream<Msg>,
+    thread_command: Option<std::sync::mpsc::Sender<ThreadCmd>>,
 }
 
 pub struct Widgets {
     port_combobox: gtk::ComboBoxText,
     connect_btn: gtk::Button,
+    disconnect_btn: gtk::Button,
     root: gtk::Box,
+}
+
+enum ThreadCmd {
+    Disconnect,
+    SendLine(String),
+}
+
+enum ThreadStatus {
+    ConnectionError,
+    RecivedLine(String),
 }
 
 pub struct Widget {
@@ -34,8 +47,9 @@ impl relm::Update for Widget {
 
     fn model(relm: &Relm<Self>, _param: Self::ModelParam) -> Self::Model {
         Model {
-            port: None,
+            connection_thread: None,
             stream: relm.stream().clone(),
+            thread_command: None,
         }
     }
 
@@ -43,8 +57,22 @@ impl relm::Update for Widget {
         match event {
             Msg::SendLine(_line) => (),
             Msg::ReciveLine(_line) => (),
+            Msg::Disconnect => {
+                // Send Stop signal to thread
+                if let Some(commander) = self.model.thread_command.take() {
+                    commander.send(ThreadCmd::Disconnect).ok();
+                }
+                // Wait for thread to finish
+                if let Some(join_handle) = self.model.connection_thread.take() {
+                    join_handle.join().ok(); // We don't care about result
+                }
+                self.widgets.connect_btn.set_sensitive(true);
+                self.widgets.disconnect_btn.set_sensitive(false);
+            }
             Msg::Connect => {
-                if self.model.port.is_none() {
+                if self.model.connection_thread.is_some() {
+                    self.update(Msg::Disconnect);
+                } else {
                     // Open a connection to the port specified in the connection tab
                     let port_settings = serialport::SerialPortSettings {
                         baud_rate: 250_000,
@@ -61,72 +89,16 @@ impl relm::Update for Widget {
                         .map(|s| s.to_string())
                         .unwrap_or_else(|| "".to_string());
 
-                    let stream = self.model.stream.clone();
-                    let (_channel, sender) =
-                        relm::Channel::new(move |line: String| stream.emit(Msg::ReciveLine(line)));
-
-                    if let Ok(mut port) =
-                        serialport::open_with_settings(&connection_string, &port_settings)
-                    {
-                        std::thread::spawn(move || {
-                            // Read data from port in an endless loop
-                            let mut buffer = vec![0; 512];
-                            let mut line = String::new();
-                            loop {
-                                // Try to read a line
-                                match port.read(&mut buffer) {
-                                    Ok(n) if n > 0 => {
-                                        println!("{}", n);
-                                        for &c in &buffer {
-                                            if c != 0x0a {
-                                                if c.is_ascii_alphanumeric()
-                                                    | c.is_ascii_punctuation()
-                                                    | c.is_ascii_whitespace()
-                                                {
-                                                    line.push(c.into());
-                                                }
-                                            } else {
-                                                sender.send(line.clone()).unwrap();
-                                                line.clear();
-                                            };
-                                        }
-                                        buffer = vec![0; 512];
-                                    }
-
-                                    Ok(_) => (),
-
-                                    Err(err) => match err.kind() {
-                                        std::io::ErrorKind::TimedOut => (),
-                                        _ => {
-                                            println!("{:?}", err);
-                                            break;
-                                        }
-                                    },
-                                };
-                            }
-                        });
-                        self.model.port = None;
-                        self.widgets.connect_btn.set_label("Disconnect");
-                        self.widgets
-                            .connect_btn
-                            .get_style_context()
-                            .add_class("destructive-action");
-                        self.widgets
-                            .connect_btn
-                            .get_style_context()
-                            .remove_class("suggested-action");
+                    if let Ok((mpsc_tx, thread_handle)) = create_connection_thread(
+                        connection_string,
+                        port_settings,
+                        self.model.stream.clone(),
+                    ) {
+                        self.widgets.connect_btn.set_sensitive(false);
+                        self.widgets.disconnect_btn.set_sensitive(true);
+                        self.model.thread_command = Some(mpsc_tx);
+                        self.model.connection_thread = Some(thread_handle);
                     }
-                } else {
-                    self.model.port.take(); // Take connection out of the Option and drop it
-                    self.widgets.connect_btn.set_label("Connect");
-                    self.widgets
-                        .connect_btn
-                        .get_style_context()
-                        .remove_class("destructive-action");
-                    self.widgets
-                        .connect_btn
-                        .get_style_context()
-                        .add_class("suggested-action");
                 }
             }
         }
@@ -159,18 +131,27 @@ impl relm::Widget for Widget {
             .get_style_context()
             .add_class("suggested-action");
         statusline.pack_start(&connect_btn, false, false, 0);
+        let disconnect_btn = gtk::Button::with_label(&"Disconnect");
+        disconnect_btn
+            .get_style_context()
+            .add_class("destructive-action");
+        statusline.pack_start(&disconnect_btn, false, false, 0);
+        disconnect_btn.set_sensitive(false);
 
         connect!(relm, connect_btn, connect_clicked(_), Msg::Connect);
+        connect!(relm, disconnect_btn, connect_clicked(_), Msg::Disconnect);
 
         Self {
             widgets: Widgets {
                 root: statusline,
                 connect_btn,
+                disconnect_btn,
                 port_combobox,
             },
             model: Model {
-                port: None,
+                connection_thread: None,
                 stream: relm.stream().clone(),
+                thread_command: None,
             },
         }
     }
@@ -183,4 +164,85 @@ fn get_ports() -> Vec<String> {
         .iter()
         .map(|port| port.port_name.clone())
         .collect()
+}
+
+/// Creates the thread with all channels that handles the connection to the printer
+fn create_connection_thread(
+    connection_string: String,
+    port_settings: SerialPortSettings,
+    stream: relm::EventStream<Msg>,
+) -> Result<
+    (
+        std::sync::mpsc::Sender<ThreadCmd>,
+        std::thread::JoinHandle<()>,
+    ),
+    (),
+> {
+    // Create Channel from and to thread
+    let (_channel, sender) = relm::Channel::new(move |msg: ThreadStatus| {
+        match msg {
+            ThreadStatus::ConnectionError => stream.emit(Msg::Disconnect),
+            ThreadStatus::RecivedLine(line) => stream.emit(Msg::ReciveLine(line)),
+        };
+    });
+
+    let (mpsc_tx, mpsc_rx) = std::sync::mpsc::channel::<ThreadCmd>();
+
+    if let Ok(mut port) = serialport::open_with_settings(&connection_string, &port_settings) {
+        let thread_handle = std::thread::spawn(move || {
+            // Read data from port in an endless loop
+            let mut buffer = vec![0; 512];
+            let mut line = String::new();
+            loop {
+                // Read Command
+                match mpsc_rx.try_recv() {
+                    Ok(cmd) => match cmd {
+                        ThreadCmd::Disconnect => break,
+                        ThreadCmd::SendLine(line) => {
+                            if port.write_all(line.as_ref()).is_err() {
+                                break;
+                            }
+                        }
+                    },
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+                    Err(std::sync::mpsc::TryRecvError::Empty) => (),
+                }
+                // Try to read a line
+                match port.read(&mut buffer) {
+                    Ok(n) if n > 0 => {
+                        for &c in &buffer {
+                            if c != 0x0a {
+                                if c.is_ascii_alphanumeric()
+                                    | c.is_ascii_punctuation()
+                                    | c.is_ascii_whitespace()
+                                {
+                                    line.push(c.into());
+                                }
+                            } else {
+                                sender
+                                    .send(ThreadStatus::RecivedLine(line.clone()))
+                                    .unwrap();
+                                line.clear();
+                            };
+                        }
+                        buffer = vec![0; 512];
+                    }
+
+                    Ok(_) => (),
+
+                    Err(err) => match err.kind() {
+                        std::io::ErrorKind::TimedOut => (),
+                        _ => {
+                            println!("{:?}", err);
+                            break;
+                        }
+                    },
+                };
+            }
+            sender.send(ThreadStatus::ConnectionError).ok();
+        });
+        Ok((mpsc_tx, thread_handle))
+    } else {
+        Err(())
+    }
 }

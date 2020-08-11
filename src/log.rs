@@ -38,14 +38,15 @@ impl relm::Update for Widget {
     fn update(&mut self, event: Self::Msg) {
         match event {
             Msg::LogLine(text) => {
-                let text = dbg!(text);
                 // Get current time
+                let time = chrono::Local::now().format("%H:%M:%S%.3f");
+                // Append Message
                 let mut end_iter = self.widgets.textview.get_buffer().unwrap().get_end_iter();
                 self.widgets
                     .textview
                     .get_buffer()
                     .unwrap()
-                    .insert(&mut end_iter, &format!("> {}\n", text));
+                    .insert(&mut end_iter, &format!("{} -> {}\n", time, text));
                 self.widgets
                     .textview
                     .scroll_to_iter(&mut end_iter, 0.0, false, 0.0, 0.0);
@@ -80,6 +81,7 @@ impl relm::Widget for Widget {
         let textview = gtk::TextView::new();
         textview.set_cursor_visible(false);
         textview.set_editable(false);
+        textview.set_property_monospace(true);
 
         let scrollview = gtk::ScrolledWindow::new(gtk::NONE_ADJUSTMENT, gtk::NONE_ADJUSTMENT);
         scrollview.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
