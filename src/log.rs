@@ -10,10 +10,12 @@ pub enum Msg {
     LogLine(String),
     SendCommand(String),
     ClearLog,
+    KeyInSendCmd(gdk::EventKey),
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-pub struct Model {}
+pub struct Model {
+    stream: relm::EventStream<Msg>,
+}
 
 struct GtkWidgets {
     root: gtk::Box,
@@ -22,7 +24,7 @@ struct GtkWidgets {
 }
 
 pub struct Widget {
-    _model: Model,
+    model: Model,
     widgets: GtkWidgets,
 }
 
@@ -31,12 +33,23 @@ impl relm::Update for Widget {
     type ModelParam = ();
     type Msg = Msg;
 
-    fn model(_relm: &Relm<Self>, _param: Self::ModelParam) -> Self::Model {
-        Model::default()
+    fn model(relm: &Relm<Self>, _param: Self::ModelParam) -> Self::Model {
+        Model {
+            stream: relm.stream().clone(),
+        }
     }
 
     fn update(&mut self, event: Self::Msg) {
         match event {
+            Msg::KeyInSendCmd(key) => {
+                if let Some(key_name) = key.get_keyval().name() {
+                    if key_name == "Return" {
+                        self.model.stream.emit(Msg::SendCommand(
+                            self.widgets.send_cmd.get_text().to_string(),
+                        ));
+                    };
+                };
+            }
             Msg::LogLine(text) => {
                 // Get current time
                 let time = chrono::Local::now().format("%H:%M:%S%.3f");
@@ -60,7 +73,8 @@ impl relm::Update for Widget {
                     .unwrap()
                     .delete(&mut start, &mut end)
             }
-            Msg::SendCommand(_text) => {
+            Msg::SendCommand(text) => {
+                self.update(Msg::LogLine(text));
                 self.widgets.send_cmd.set_text("");
             }
         }
@@ -114,9 +128,15 @@ impl relm::Widget for Widget {
             Msg::SendCommand(send_cmd_clone.get_text().to_string())
         );
         relm::connect!(relm, clear_btn, connect_clicked(_), Msg::ClearLog);
+        relm::connect!(
+            relm,
+            send_cmd,
+            connect_key_press_event(_, key),
+            return (Msg::KeyInSendCmd(key.clone()), gtk::Inhibit(false))
+        );
 
         Self {
-            _model: model,
+            model,
             widgets: GtkWidgets {
                 root: root_box,
                 send_cmd,

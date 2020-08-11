@@ -55,7 +55,13 @@ impl relm::Update for Widget {
 
     fn update(&mut self, event: Self::Msg) {
         match event {
-            Msg::SendLine(_line) => (),
+            Msg::SendLine(line) => {
+                if let Some(ref thread_command) = self.model.thread_command {
+                    thread_command
+                        .send(ThreadCmd::SendLine(format!("{}\n", line)))
+                        .ok();
+                }
+            }
             Msg::ReciveLine(_line) => (),
             Msg::Disconnect => {
                 // Send Stop signal to thread

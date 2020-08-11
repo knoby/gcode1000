@@ -109,6 +109,7 @@ impl Widget for Win {
             return (Some(Msg::Quit), gtk::Inhibit(false))
         );
         connect!(connection_control@connection::Msg::ReciveLine(ref text), logging, log::Msg::LogLine(text.clone()));
+        connect!(logging@log::Msg::SendCommand(ref text), connection_control, connection::Msg::SendLine(text.clone()));
 
         // Return the Widget
         Win {

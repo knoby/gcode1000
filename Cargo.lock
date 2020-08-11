@@ -206,6 +206,7 @@ name = "gcode1000"
 version = "0.1.0"
 dependencies = [
  "chrono 0.4.13 (registry+https://github.com/rust-lang/crates.io-index)",
+ "gdk 0.13.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "gtk 0.9.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "relm 0.20.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "relm-derive 0.20.0 (registry+https://github.com/rust-lang/crates.io-index)",
