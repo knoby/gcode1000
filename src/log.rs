@@ -73,8 +73,7 @@ impl relm::Update for Widget {
                     .unwrap()
                     .delete(&mut start, &mut end)
             }
-            Msg::SendCommand(text) => {
-                self.update(Msg::LogLine(text));
+            Msg::SendCommand(_text) => {
                 self.widgets.send_cmd.set_text("");
             }
         }

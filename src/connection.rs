@@ -55,17 +55,12 @@ impl relm::Update for Widget {
         }
     }
 
-    fn subscriptions(&mut self, relm: &Relm<Self>) {
-        // Get Position every second
-        relm::interval(relm.stream(), 1000, || Msg::SendLine("M114".to_string()));
-    }
-
     fn update(&mut self, event: Self::Msg) {
         match event {
             Msg::SendLine(line) => {
                 if let Some(ref thread_command) = self.model.thread_command {
                     if (std::time::Instant::now() - self.model.connection_start)
-                        > std::time::Duration::from_secs(10)
+                        > std::time::Duration::from_secs(1)
                     {
                         thread_command
                             .send(ThreadCmd::SendLine(format!("{}\n", line)))

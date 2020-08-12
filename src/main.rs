@@ -9,9 +9,14 @@ mod log;
 #[derive(Debug, Clone, Msg)]
 enum Msg {
     Quit,
+    EnqueueCommand(String),
+    ClearCommandQueue,
+    EvalResponse(String),
+    SendCommand,
 }
 
 struct Win {
+    model: Model,
     _manual_control: Component<control::Widget>,
     _connection_control: Component<connection::Widget>,
     _logging: Component<log::Widget>,
@@ -19,15 +24,56 @@ struct Win {
     window: gtk::Window,
 }
 
+struct Model {
+    command_queue: std::collections::VecDeque<String>,
+    waiting_for_ok: bool,
+    relm: Relm<Win>,
+}
+
 impl Update for Win {
-    type Model = ();
+    type Model = Model;
     type ModelParam = ();
     type Msg = Msg;
 
-    fn model(_relm: &Relm<Self>, _param: Self::ModelParam) -> Self::Model {}
+    fn model(relm: &Relm<Self>, _param: Self::ModelParam) -> Self::Model {
+        Model {
+            command_queue: std::collections::VecDeque::new(),
+            relm: relm.clone(),
+            waiting_for_ok: false,
+        }
+    }
 
     fn update(&mut self, event: Self::Msg) {
         match event {
+            Msg::EnqueueCommand(command) => {
+                self.model.command_queue.push_back(command);
+                self.model.relm.stream().emit(Msg::SendCommand);
+            }
+            Msg::SendCommand => {
+                // Check if we are currently waiting for a response
+                if !self.model.waiting_for_ok {
+                    // Is something in the queue?
+                    if !self.model.command_queue.is_empty() {
+                        let command = self.model.command_queue.pop_front().unwrap();
+                        self._connection_control
+                            .emit(connection::Msg::SendLine(command.clone()));
+                        self._logging.emit(log::Msg::LogLine(command));
+                        self.model.waiting_for_ok = true;
+                    }
+                }
+            }
+            Msg::EvalResponse(response) => {
+                // Are we waiting for a response?
+                if self.model.waiting_for_ok && (response == "ok") {
+                    self.model.waiting_for_ok = false;
+                    // Send new command
+                    self.model.relm.stream().emit(Msg::SendCommand);
+                }
+            }
+            Msg::ClearCommandQueue => {
+                self.model.command_queue.clear();
+                self.model.waiting_for_ok = false;
+            }
             Msg::Quit => gtk::main_quit(),
         }
     }
@@ -108,8 +154,14 @@ impl Widget for Win {
             connect_delete_event(_, _),
             return (Some(Msg::Quit), gtk::Inhibit(false))
         );
+        // Add Line to log
         connect!(connection_control@connection::Msg::ReciveLine(ref text), logging, log::Msg::LogLine(text.clone()));
-        connect!(logging@log::Msg::SendCommand(ref text), connection_control, connection::Msg::SendLine(text.clone()));
+        // Add Line to Command Queue
+        connect!(logging@log::Msg::SendCommand(ref text), relm, Msg::EnqueueCommand(text.clone()));
+        // Clear Command Buffer
+        connect!(connection_control@connection::Msg::Disconnect, relm, Msg::ClearCommandQueue);
+        // Connect Response Eval
+        connect!(connection_control@connection::Msg::ReciveLine(ref text), relm, Msg::EvalResponse(text.clone()));
 
         // Return the Widget
         Win {
@@ -118,6 +170,11 @@ impl Widget for Win {
             _connection_control: connection_control,
             _logging: logging,
             _port: None,
+            model: Model {
+                command_queue: std::collections::VecDeque::new(),
+                relm: relm.clone(),
+                waiting_for_ok: false,
+            },
         }
     }
 }
