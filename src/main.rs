@@ -13,6 +13,8 @@ enum Msg {
     ClearCommandQueue,
     EvalResponse(String),
     SendCommand,
+    Connect,
+    Disconnect,
 }
 
 struct Win {
@@ -26,6 +28,7 @@ struct Win {
 
 struct Model {
     command_queue: std::collections::VecDeque<String>,
+    connected: bool,
     waiting_for_ok: bool,
     relm: Relm<Win>,
 }
@@ -40,18 +43,28 @@ impl Update for Win {
             command_queue: std::collections::VecDeque::new(),
             relm: relm.clone(),
             waiting_for_ok: false,
+            connected: false,
         }
     }
 
     fn update(&mut self, event: Self::Msg) {
         match event {
+            Msg::Connect => {
+                self.model.connected = true;
+                self.model.relm.stream().emit(Msg::ClearCommandQueue);
+            }
+            Msg::Disconnect => {
+                self.model.connected = false;
+            }
             Msg::EnqueueCommand(command) => {
-                self.model.command_queue.push_back(command);
-                self.model.relm.stream().emit(Msg::SendCommand);
+                if self.model.connected {
+                    self.model.command_queue.push_back(command);
+                    self.model.relm.stream().emit(Msg::SendCommand);
+                }
             }
             Msg::SendCommand => {
                 // Check if we are currently waiting for a response
-                if !self.model.waiting_for_ok {
+                if !self.model.waiting_for_ok & self.model.connected {
                     // Is something in the queue?
                     if !self.model.command_queue.is_empty() {
                         let command = self.model.command_queue.pop_front().unwrap();
@@ -64,10 +77,23 @@ impl Update for Win {
             }
             Msg::EvalResponse(response) => {
                 // Are we waiting for a response?
-                if self.model.waiting_for_ok && (response == "ok") {
-                    self.model.waiting_for_ok = false;
-                    // Send new command
-                    self.model.relm.stream().emit(Msg::SendCommand);
+                if self.model.waiting_for_ok {
+                    let maybe_ok = response.split_at(2);
+                    if maybe_ok.0 == "ok" {
+                        self.model.waiting_for_ok = false;
+                        // Check if it is answer to temperature or position
+                        match maybe_ok.1.chars().nth(0) {
+                            Some('T') => self
+                                ._manual_control
+                                .emit(control::Msg::SetTemperature(maybe_ok.1.to_string())),
+                            Some('X') => self
+                                ._manual_control
+                                .emit(control::Msg::SetTemperature(maybe_ok.1.to_string())),
+                            _ => (),
+                        }
+                        // Send new command
+                        self.model.relm.stream().emit(Msg::SendCommand);
+                    }
                 }
             }
             Msg::ClearCommandQueue => {
@@ -86,7 +112,7 @@ impl Widget for Win {
         self.window.clone()
     }
 
-    fn view(relm: &Relm<Self>, _model: Self::Model) -> Self {
+    fn view(relm: &Relm<Self>, model: Self::Model) -> Self {
         // Create the UI
 
         // The main Window
@@ -158,8 +184,11 @@ impl Widget for Win {
         connect!(connection_control@connection::Msg::ReciveLine(ref text), logging, log::Msg::LogLine(text.clone()));
         // Add Line to Command Queue
         connect!(logging@log::Msg::SendCommand(ref text), relm, Msg::EnqueueCommand(text.clone()));
+        // Add Command from control
+        connect!(manual_control@control::Msg::SendCmd(ref text), relm, Msg::EnqueueCommand(text.clone()));
         // Clear Command Buffer
-        connect!(connection_control@connection::Msg::Disconnect, relm, Msg::ClearCommandQueue);
+        connect!(connection_control@connection::Msg::Disconnect, relm, Msg::Disconnect);
+        connect!(connection_control@connection::Msg::ConnectionActive, relm, Msg::Connect);
         // Connect Response Eval
         connect!(connection_control@connection::Msg::ReciveLine(ref text), relm, Msg::EvalResponse(text.clone()));
 
@@ -170,11 +199,7 @@ impl Widget for Win {
             _connection_control: connection_control,
             _logging: logging,
             _port: None,
-            model: Model {
-                command_queue: std::collections::VecDeque::new(),
-                relm: relm.clone(),
-                waiting_for_ok: false,
-            },
+            model,
         }
     }
 }

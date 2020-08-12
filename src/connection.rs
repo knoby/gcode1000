@@ -7,6 +7,7 @@ use std::io::Read;
 #[derive(Msg)]
 pub enum Msg {
     Connect,
+    ConnectionActive,
     SendLine(String),
     Disconnect,
     ReciveLine(String),
@@ -16,7 +17,7 @@ pub struct Model {
     connection_thread: Option<std::thread::JoinHandle<()>>,
     stream: relm::EventStream<Msg>,
     thread_command: Option<std::sync::mpsc::Sender<ThreadCmd>>,
-    connection_start: std::time::Instant,
+    connection_active: bool,
 }
 
 pub struct Widgets {
@@ -34,6 +35,7 @@ enum ThreadCmd {
 enum ThreadStatus {
     ConnectionError,
     RecivedLine(String),
+    ConnectionActive,
 }
 
 pub struct Widget {
@@ -51,7 +53,7 @@ impl relm::Update for Widget {
             connection_thread: None,
             stream: relm.stream().clone(),
             thread_command: None,
-            connection_start: std::time::Instant::now(),
+            connection_active: false,
         }
     }
 
@@ -59,9 +61,7 @@ impl relm::Update for Widget {
         match event {
             Msg::SendLine(line) => {
                 if let Some(ref thread_command) = self.model.thread_command {
-                    if (std::time::Instant::now() - self.model.connection_start)
-                        > std::time::Duration::from_secs(1)
-                    {
+                    if self.model.connection_active {
                         thread_command
                             .send(ThreadCmd::SendLine(format!("{}\n", line)))
                             .ok();
@@ -70,6 +70,7 @@ impl relm::Update for Widget {
             }
             Msg::ReciveLine(_line) => (),
             Msg::Disconnect => {
+                self.model.connection_active = false;
                 // Send Stop signal to thread
                 if let Some(commander) = self.model.thread_command.take() {
                     commander.send(ThreadCmd::Disconnect).ok();
@@ -110,10 +111,10 @@ impl relm::Update for Widget {
                         self.widgets.disconnect_btn.set_sensitive(true);
                         self.model.thread_command = Some(mpsc_tx);
                         self.model.connection_thread = Some(thread_handle);
-                        self.model.connection_start = std::time::Instant::now();
                     }
                 }
             }
+            Msg::ConnectionActive => self.model.connection_active = true,
         }
     }
 }
@@ -125,7 +126,7 @@ impl relm::Widget for Widget {
         self.widgets.root.clone()
     }
 
-    fn view(relm: &Relm<Self>, _model: Self::Model) -> Self {
+    fn view(relm: &Relm<Self>, model: Self::Model) -> Self {
         // Create the status line
         let statusline = gtk::Box::new(gtk::Orientation::Horizontal, 2);
 
@@ -161,12 +162,7 @@ impl relm::Widget for Widget {
                 disconnect_btn,
                 port_combobox,
             },
-            model: Model {
-                connection_thread: None,
-                stream: relm.stream().clone(),
-                thread_command: None,
-                connection_start: std::time::Instant::now(),
-            },
+            model,
         }
     }
 }
@@ -197,6 +193,7 @@ fn create_connection_thread(
         match msg {
             ThreadStatus::ConnectionError => stream.emit(Msg::Disconnect),
             ThreadStatus::RecivedLine(line) => stream.emit(Msg::ReciveLine(line)),
+            ThreadStatus::ConnectionActive => stream.emit(Msg::ConnectionActive),
         };
     });
 
@@ -204,23 +201,34 @@ fn create_connection_thread(
 
     if let Ok(mut port) = serialport::open_with_settings(&connection_string, &port_settings) {
         let thread_handle = std::thread::spawn(move || {
+            // After thread start wait some time
+            let connection_active_time =
+                std::time::Instant::now() + std::time::Duration::from_secs(10);
+            let mut connected = false;
             // Read data from port in an endless loop
             let mut buffer = vec![0; 512];
             let mut line = String::new();
             loop {
-                // Read Command
-                match mpsc_rx.try_recv() {
-                    Ok(cmd) => match cmd {
-                        ThreadCmd::Disconnect => break,
-                        ThreadCmd::SendLine(line) => {
-                            if port.write_all(line.as_ref()).is_err() {
-                                break;
+                // Check for connection
+                if connected {
+                    // Read Command
+                    match mpsc_rx.try_recv() {
+                        Ok(cmd) => match cmd {
+                            ThreadCmd::Disconnect => break,
+                            ThreadCmd::SendLine(line) => {
+                                if port.write_all(line.as_ref()).is_err() {
+                                    break;
+                                }
                             }
-                        }
-                    },
-                    Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
-                    Err(std::sync::mpsc::TryRecvError::Empty) => (),
+                        },
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+                        Err(std::sync::mpsc::TryRecvError::Empty) => (),
+                    }
+                } else if connection_active_time < std::time::Instant::now() {
+                    connected = true;
+                    sender.send(ThreadStatus::ConnectionActive).unwrap();
                 }
+
                 // Try to read a line
                 match port.read(&mut buffer) {
                     Ok(n) if n > 0 => {
