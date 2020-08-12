@@ -16,6 +16,7 @@ pub struct Model {
     connection_thread: Option<std::thread::JoinHandle<()>>,
     stream: relm::EventStream<Msg>,
     thread_command: Option<std::sync::mpsc::Sender<ThreadCmd>>,
+    connection_start: std::time::Instant,
 }
 
 pub struct Widgets {
@@ -50,16 +51,26 @@ impl relm::Update for Widget {
             connection_thread: None,
             stream: relm.stream().clone(),
             thread_command: None,
+            connection_start: std::time::Instant::now(),
         }
+    }
+
+    fn subscriptions(&mut self, relm: &Relm<Self>) {
+        // Get Position every second
+        relm::interval(relm.stream(), 1000, || Msg::SendLine("M114".to_string()));
     }
 
     fn update(&mut self, event: Self::Msg) {
         match event {
             Msg::SendLine(line) => {
                 if let Some(ref thread_command) = self.model.thread_command {
-                    thread_command
-                        .send(ThreadCmd::SendLine(format!("{}\n", line)))
-                        .ok();
+                    if (std::time::Instant::now() - self.model.connection_start)
+                        > std::time::Duration::from_secs(10)
+                    {
+                        thread_command
+                            .send(ThreadCmd::SendLine(format!("{}\n", line)))
+                            .ok();
+                    }
                 }
             }
             Msg::ReciveLine(_line) => (),
@@ -104,6 +115,7 @@ impl relm::Update for Widget {
                         self.widgets.disconnect_btn.set_sensitive(true);
                         self.model.thread_command = Some(mpsc_tx);
                         self.model.connection_thread = Some(thread_handle);
+                        self.model.connection_start = std::time::Instant::now();
                     }
                 }
             }
@@ -158,6 +170,7 @@ impl relm::Widget for Widget {
                 connection_thread: None,
                 stream: relm.stream().clone(),
                 thread_command: None,
+                connection_start: std::time::Instant::now(),
             },
         }
     }
